@@ -3,6 +3,7 @@ sys = require('sys'),
 util = require('util'),
 OAuth = require('oauth').OAuth,
 fs = require('fs');
+var path = require('path');
 
 var app = module.exports = express.createServer()
 
@@ -13,24 +14,22 @@ app.configure('development', function() {
   app.use(express.session({secret: "ssshhhh!"}));
 });
 
-var configFile = process.env['HOME']+"/config.js";
+
+var appDir = path.dirname(require.main.filename) + "/"
+var configFile = appDir + "config.js"
+
 var config = require(configFile);
-
-var privateKeyData = fs.readFileSync(config["consumerPrivateKeyFile"], "utf8");
-
-var consumer = 
-  new OAuth("https://jdog.atlassian.com/plugins/servlet/oauth/request-token",
-                  "https://jdog.atlassian.com/plugins/servlet/oauth/access-token",
+var privateKeyData = fs.readFileSync(appDir+config["consumerPrivateKeyFile"], "utf8");
+var consumer =  // create a new consumer 
+  new OAuth(config['url'] + "plugins/servlet/oauth/request-token",
+  				  config['url'] + "plugins/servlet/oauth/access-token",
                   config["consumerKey"],
                   "",
                   "1.0",
-                  "http://localhost:8080/sessions/callback",
+                  "http://localhost:8080/sessions/callback", //callback url
                   "RSA-SHA1",
 				  null,
 				  privateKeyData);
-
-
-
 
 app.dynamicHelpers({
   	session: function(request, response){
@@ -38,27 +37,28 @@ app.dynamicHelpers({
 	}
 });
 
+// onload get 
 app.get('/', function(request, response){
   	response.send('Hello World');
 });
 
-app.get('/sessions/connect', function(request, response){
+app.get('/sessions/connect', function(request, response){ // connects to atlassian and begins auth process 
 	consumer.getOAuthRequestToken(
 		function(error, oauthToken, oauthTokenSecret, results) {
     		if (error) {
-				console.log(error.data);
+				console.log(error);
       			response.send('Error getting OAuth access token');
 			}
     		else {
       			request.session.oauthRequestToken = oauthToken;
-      			request.session.oauthRequestTokenSecret = oauthTokenSecret;
-      			response.redirect("https://jdog.atlassian.com/plugins/servlet/oauth/authorize?oauth_token="+request.session.oauthRequestToken);
+				  request.session.oauthRequestTokenSecret = oauthTokenSecret;
+      			response.redirect(config['url'] + "plugins/servlet/oauth/authorize?oauth_token="+request.session.oauthRequestToken);
 			}
 		}
 	)
 });
 
-app.get('/sessions/callback', function(request, response){
+app.get('/sessions/callback', function(request, response){ // after user has authenticated they are redirected to this callback containing the necessary information
 	consumer.getOAuthAccessToken (
 			request.session.oauthRequestToken, 
 			request.session.oauthRequestTokenSecret, 
@@ -71,14 +71,14 @@ app.get('/sessions/callback', function(request, response){
     			else {
       				request.session.oauthAccessToken = oauthAccessToken;
       				request.session.oauthAccessTokenSecret = oauthAccessTokenSecret;
-      				consumer.get("https://jdog.atlassian.com/rest/api/latest/issue/JRADEV-8110.json", 
+      				consumer.get(config['url'] + "rest/api/latest/issue/NUF-1.json", // change ticket to a different ticket
 						request.session.oauthAccessToken, 
 						request.session.oauthAccessTokenSecret, 
 						"application/json",
 						function(error, data, resp){
 							console.log(data);
         					data = JSON.parse(data);
-        					response.send("I am looking at: "+data["key"]);
+        					response.send("sucess" );
 						}
 					);
 				}
@@ -86,5 +86,32 @@ app.get('/sessions/callback', function(request, response){
 		)
 	});
 					
+	app.get('/projects', function(request, response){
+		consumer.get(config['url'] + "rest/api/latest/project", 
+			request.session.oauthAccessToken, 
+			request.session.oauthAccessTokenSecret, 
+			"application/json",
+			function(error, data, resp){
+				data = JSON.parse(data);
+				console.log(data);
+				response.send("all projects: " + data);
+			}
+		);
+	});
+	app.get('/projects/:id', function(request, response){
+		consumer.get(config['url'] + "rest/api/latest/project/" + request.params.id, 
+			request.session.oauthAccessToken, 
+			request.session.oauthAccessTokenSecret, 
+			"application/json",
+			function(error, data, resp){
+				console.log(data);
+				data = JSON.parse(data);
+				response.send("Project with key ", request.params.id , ": ", data);
+			}
+		);
+	});
+
+	
+
 
 app.listen(parseInt(process.env.PORT || 8080));
